@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex - Your Coding AI</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="chat_container"></div>
+      <form>
+        <textarea
+          name="prompt"
+          required
+          rows="1"
+          cols="1"
+          placeholder="Ask about the Constitution of Pakistan..."
+        ></textarea>
+        <button type="submit"><img src="assets/send.jpg" /></button>
+        <button class="mic-toggle" type="button" id="micButton">
+          <img src="assets/microphone2.ico" />
+          <a>Press to Start/Stop Recording</a>
+        </button>
+        <audio class="playback" controls></audio>
+      </form>
+    </div>
+    <script type="module" src="/script.js"></script>
+  </body>
+</html>
