@@ -56,6 +56,8 @@ function chatStripe(isAi, value, uniqueId) {
   `;
 }
 
+let chat_history = [];
+
 const handleSubmit = async (e) => {
   e.preventDefault();
 
@@ -67,48 +69,94 @@ const handleSubmit = async (e) => {
     return;
   }
 
-  // user's chatstripe
+  // Add user's input to chat
   chatContainer.innerHTML += chatStripe(false, prompt);
-
   form.reset();
 
-  // bot's chatstripe
+  // Push user's prompt to chat history
+  chat_history.push({
+    role: "human",
+    content: prompt,
+  });
+
+  // Bot's placeholder stripe with uniqueId for streaming updates
   const uniqueId = generateUniqueId();
   chatContainer.innerHTML += chatStripe(true, " ", uniqueId);
-
   chatContainer.scrollTop = chatContainer.scrollHeight;
-
   const messageDiv = document.getElementById(uniqueId);
 
   loader(messageDiv);
 
-  // fetch data from server -> bot's response
-  const response = await fetch("http://localhost:8989", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      prompt: data.get("prompt"),
-    }),
-  });
+  try {
+    // Make the POST request to stream the response
+    const response = await fetch("http://10.3.40.150:8989/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        chat_history: chat_history,
+      }),
+    });
 
-  clearInterval(loadInterval);
-  messageDiv.innerHTML = "";
+    // Check if the response is a stream
+    if (response.ok) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let isStreaming = true;
+      let assistantResponse = "";
 
-  if (response.ok) {
-    const data = await response.json();
-    const parsedData = data.bot.trim();
+      while (isStreaming) {
+        const { done, value } = await reader.read();
+        if (done) {
+          isStreaming = false;
+          break;
+        }
 
-    typeText(messageDiv, parsedData);
-  } else {
-    const err = await response.json();
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n").filter(line => line.trim() !== "");
 
+        for (const line of lines) {
+          try {
+            const jsonResponse = JSON.parse(line);
+            const token = jsonResponse.content;
+
+            if (token) {
+              // Append the streamed token to the assistant's message
+              assistantResponse += token;
+              messageDiv.innerHTML += token;
+
+              // Scroll to the bottom of chat container
+              chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+
+            // If it's the end of the response, add it to chat history
+            if (jsonResponse.content === "") {
+              chat_history.push({
+                role: "assistant",
+                content: assistantResponse.trim(),
+              });
+            }
+          } catch (error) {
+            console.error("Failed to parse chunk:", error);
+          }
+        }
+      }
+    } else {
+      const err = await response.json();
+      messageDiv.innerHTML = "Something went wrong";
+      alert(err.message || "Failed to get response");
+    }
+  } catch (error) {
+    clearInterval(loadInterval);
     messageDiv.innerHTML = "Something went wrong";
-
-    alert(err);
+    console.error("Error fetching response:", error);
+    alert("An error occurred while sending the message.");
+  } finally {
+    clearInterval(loadInterval);
   }
 };
+
 
 const micBtn = document.querySelector("#micButton");
 const playback = document.querySelector(".playback");
@@ -137,7 +185,7 @@ function SetupStream(stream) {
     chunks.push(e.data);
   };
   audio.onstop = (e) => {
-    const blob = new Blob(chunks, { type: "audio/ogg; codecs=opus" });
+    const blob = new Blob(chunks, { type: "audio/wav; codecs=opus" });
     chunks = [];
     const audioURL = window.URL.createObjectURL(blob);
     playback.src = audioURL;
@@ -154,6 +202,41 @@ function ToggleMic() {
   } else {
     audio.stop();
     micBtn.classList.remove("isRec");
+
+    audio.onstop = async (e) => {
+      const blob = new Blob(chunks, { type: "audio/wav; codecs=opus" });
+      chunks = [];
+
+      const formData = new FormData();
+      formData.append("audio", blob, "recording.wav");
+
+      try {
+        const response = await fetch("http://10.3.40.150:8989/v1/audio/transcriptions", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log("Audio processed: ", data);
+          const parsedData = data.transcript || "No response";
+          chatContainer.innerHTML += chatStripe(
+            true,
+            parsedData,
+            generateUniqueId()
+          );
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        } else {
+          console.error("Failed to send audio");
+          alert("Failed to send audio to server.");
+        }
+      } catch (error) {
+        console.error("Error during fetch:", error);
+        alert("An error occurred while sending the audio.");
+      }
+    };
+    const audioURL = window.URL.createObjectURL(blob);
+    playback.src = audioURL;
   }
 }
 
